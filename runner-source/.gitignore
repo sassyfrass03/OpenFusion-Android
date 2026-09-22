@@ -1,0 +1,14 @@
+*.exe
+*.dll
+*.res
+*.log
+*.dxvk-cache
+assets/
+mono/
+player/
+loader/
+out/
+build/
+.vscode/
+*-swp
+robots.txt

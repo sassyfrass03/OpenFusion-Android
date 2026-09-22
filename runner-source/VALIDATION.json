@@ -1,0 +1,22 @@
+{
+  "build": "1.9.0-android-auth-kbm-toplevel2",
+  "architecture": "PE32 i386",
+  "compiled_binary": true,
+  "tested": [
+    "18 portable argument parser cases",
+    "guarded/deduplicated Unity window attachment",
+    "75 ms resize debounce",
+    "deferred display-change geometry",
+    "fullscreen-safe controller focus gate static regression",
+    "top-level UnityWindow browser-renderer promotion hooks",
+    "Enter/Return scan-code injection for Start/Pause",
+    "DXVK_FORCE_WINDOWED set before Unity plugin load",
+    "controller timer shutdown path"
+  ],
+  "not_tested": [
+    "Wine/Ludashi top-level browser renderer behavior",
+    "physical Start/Pause Enter/Return scan-code behavior",
+    "browser-mode Vulkan frame pacing on Android"
+  ],
+  "sha256": "8078aa13dd4557ac78fbb28efe2d0041ec811f62377a84f5be79f1595a3363eb"
+}

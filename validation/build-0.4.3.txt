@@ -1,0 +1,51 @@
+----------
+1. WARNING in /workspace/scratch/d9679460e580/work/OpenFusionLauncher-main/android/app/src/main/java/dev/openfusion/launcher/AssetProxyService.java (at line 47)
+	if(server!=null)try{server.close();}catch(Exception ignored){}address="";stopForeground(true);super.onDestroy();
+	                                                                         ^^^^^^^^^^^^^^^^^^^^
+The method stopForeground(boolean) from the type Service is deprecated
+----------
+----------
+2. WARNING in /workspace/scratch/d9679460e580/work/OpenFusionLauncher-main/android/app/src/main/java/dev/openfusion/launcher/MainActivity.java (at line 41)
+	else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+	                         ^^^^^^^^^^^^^^^^^^^^^^^^^^
+The method getSystemWindowInsetLeft() from the type WindowInsets is deprecated
+----------
+3. WARNING in /workspace/scratch/d9679460e580/work/OpenFusionLauncher-main/android/app/src/main/java/dev/openfusion/launcher/MainActivity.java (at line 41)
+	else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+	                                                           ^^^^^^^^^^^^^^^^^^^^^^^^^
+The method getSystemWindowInsetTop() from the type WindowInsets is deprecated
+----------
+4. WARNING in /workspace/scratch/d9679460e580/work/OpenFusionLauncher-main/android/app/src/main/java/dev/openfusion/launcher/MainActivity.java (at line 41)
+	else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+	                                                                                            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The method getSystemWindowInsetRight() from the type WindowInsets is deprecated
+----------
+5. WARNING in /workspace/scratch/d9679460e580/work/OpenFusionLauncher-main/android/app/src/main/java/dev/openfusion/launcher/MainActivity.java (at line 41)
+	else v.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+	                                                                                                                               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+The method getSystemWindowInsetBottom() from the type WindowInsets is deprecated
+----------
+6. WARNING in /workspace/scratch/d9679460e580/work/OpenFusionLauncher-main/android/app/src/main/java/dev/openfusion/launcher/MainActivity.java (at line 286)
+	@Override public void onBackPressed(){if(web!=null)web.evaluateJavascript("window.androidBack && window.androidBack()",null);else super.onBackPressed();}
+	                                                                                                                                        ^^^^^^^^^^^^^^^
+The method onBackPressed() from the type Activity is deprecated
+----------
+6 problems (6 warnings)
+Verifies
+Verified using v1 scheme (JAR signing): false
+Verified using v2 scheme (APK Signature Scheme v2): true
+Verified using v3 scheme (APK Signature Scheme v3): true
+Verified using v3.1 scheme (APK Signature Scheme v3.1): false
+Verified using v4 scheme (APK Signature Scheme v4): false
+Verified for SourceStamp: false
+Number of signers: 1
+Signer #1 certificate DN: CN=Android Debug, O=Android, C=US
+Signer #1 certificate SHA-256 digest: 8d943bc2f957f8afcf154408468e05f830b71f65257791aa67bb74982fc6c1eb
+Signer #1 certificate SHA-1 digest: 1f4c3b7b912119a056bd1fc310a50e6059258d50
+Signer #1 certificate MD5 digest: e9972210b0849c7f84c83b88ff08910e
+Signer #1 key algorithm: RSA
+Signer #1 key size (bits): 2048
+Signer #1 public key SHA-256 digest: a0ad92bec8110b923281df4dd1a24ce4b285b85dd0e081ed437316b5a30e1098
+Signer #1 public key SHA-1 digest: 39df87661232ed5cddd881c5f7ef23d96e6b6fe7
+Signer #1 public key MD5 digest: 622208bbaba71343a8ce2f40a63ff1e3
+Built /workspace/scratch/d9679460e580/deliverables/OpenFusionAndroid-test-0.4.3.apk (9,758,518 bytes)

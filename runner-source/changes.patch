@@ -1,0 +1,829 @@
+--- original/ffrunner.c
++++ custom/ffrunner.c
+@@ -1,5 +1,6 @@
+ #include "ffrunner.h"
+-#include "arg.h"
++#include <errno.h>
++#include <limits.h>
+ 
+ NPP_t npp;
+ NPPluginFuncs pluginFuncs;
+@@ -11,7 +12,7 @@
+ NPWindow npWin;
+ NPObject *scriptableObject;
+ 
+-Arguments args = { 0 };
++Arguments args = { .windowMode = WINDOWED };
+ 
+ #define NPIDENTIFIERCOUNT 32
+ #define NPSTRINGMAXSIZE 128
+@@ -456,90 +457,102 @@
+     netscapeFuncs.getstringidentifiers = NPN_GetStringIdentifiersProc;
+ }
+ 
++static void
++usage(void)
++{
++    puts("FFRunner " FFRUNNER_BUILD " (x86 / 32-bit Unity Web Player)");
++    puts("Usage: ffrunner-android.exe [OPTION...]");
++    puts("  -m, --main URL          Main Unity content URL or file");
++    puts("  -a, --address HOST:PORT Login server");
++    puts("      --asseturl URL      Asset CDN URL");
++    puts("  -e, --endpoint HOST     OFAPI host");
++    puts("  -u, --username NAME     Auto-login username");
++    puts("  -t, --token TOKEN       Auto-login session token");
++    puts("  -n, --name TEXT         Window title");
++    puts("  -l, --log PATH          Log file");
++    puts("  -v, --verbose           Verbose diagnostic logging");
++    puts("  -i, --icon URL          Window icon");
++    puts("      --width N          Client width for window modes (320..16384)");
++    puts("      --height N         Client height for window modes (200..16384)");
++    puts("      --borderless       Fill container display without borders (experimental)");
++    puts("      --borderless-window Remove borders; use --width and --height");
++    puts("      --windowed         Normal framed window (default); use --width and --height");
++    puts("      --vram-mb N        Unity memory hint (128..2048); default 512 MB");
++    puts("      --query-vram       Opt in to DXGI memory probing");
++    puts("      --force-opengl     Use Unity's OpenGL fallback");
++    puts("      --force-vulkan     Use d3d9_vulkan.dll");
++    puts("      --loader-images    Use the endpoint's loading images");
++    puts("      --version          Print runner build and exit");
++    puts("  -h, --help             Show this help");
++}
++
++static uint32_t
++parse_number(const char *text, uint32_t low, uint32_t high, const char *option)
++{
++    char *end;
++    errno = 0;
++    unsigned long value = strtoul(text, &end, 10);
++    if (errno || !*text || *text == '-' || *end || value < low || value > high) {
++        fprintf(stderr, "Invalid %s: expected %u..%u.\n", option, low, high);
++        exit(2);
++    }
++    return (uint32_t)value;
++}
++
+ void
+ parse_args(int argc, char **argv)
+ {
+-    ARG_BEGIN {
+-        if (ARG_LONG("verbose")) case 'v': {
+-            args.verboseLogging = true;
+-            ARG_FLAG();
+-        } else if (ARG_LONG("main")) case 'm': {
+-            args.mainPathOrAddress = ARG_VAL();
+-        } else if (ARG_LONG("log")) case 'l': {
+-            args.logPath = ARG_VAL();
+-        } else if (ARG_LONG("address")) case 'a': {
+-            args.serverAddress = ARG_VAL();
+-        } else if (ARG_LONG("asseturl")) {
+-            args.assetUrl = ARG_VAL();
+-        } else if (ARG_LONG("endpoint")) case 'e': {
+-            args.endpointHost = ARG_VAL();
+-        } else if (ARG_LONG("username")) case 'u': {
+-            args.tegId = ARG_VAL();
+-        } else if (ARG_LONG("token")) case 't': {
+-            args.authId = ARG_VAL();
+-        } else if (ARG_LONG("width")) {
+-            args.windowWidth = atoi(ARG_VAL());
+-        } else if (ARG_LONG("height")) {
+-            args.windowHeight = atoi(ARG_VAL());
+-        } else if (ARG_LONG("icon")) case 'i': {
+-            args.windowIcon = ARG_VAL();
+-        } else if (ARG_LONG("loader-images")) {
+-            args.useEndpointLoadingScreen = true;
+-        } else if (ARG_LONG("force-vulkan")) {
+-            args.forceVulkan = true;
+-        } else if (ARG_LONG("force-opengl")) {
+-            args.forceOpenGl = true;
+-        } else if (ARG_LONG("name")) case 'n': {
+-            args.windowName = ARG_VAL();
+-        } else if (ARG_LONG("help")) case 'h': {
+-            puts("Usage: ffrunner.exe [OPTION...]");
+-            puts("  -m, --main=STR          The main URL to load");
+-            puts("  -l, --log=STR           The path to the log file");
+-            puts("  -v, --verbose           Enable verbose logging");
+-            puts("  -a, --address=STR       The address of the server");
+-            puts("      --asseturl=STR      The URL of the CDN for assets");
+-            puts("  -e, --endpoint=STR      The OFAPI endpoint URL");
+-            puts("  -u, --username=STR      Username for auto-login");
+-            puts("  -t, --token=STR         Password or token for auto-login");
+-            puts("      --width=INT         The width of the window");
+-            puts("      --height=INT        The height of the window");
+-            puts("  -i, --icon              URL of icon to use for the window");
+-            puts("      --loader-images     Use loading screen images from endpoint");
+-            puts("      --force-vulkan      Force Vulkan renderer");
+-            puts("      --force-opengl      Force OpenGL renderer");
+-            puts("  -n, --name=STR          Set the window name");
+-            puts("  -h, --help              Display this help menu");
+-            puts("");
+-            exit(0);
++    for (int i = 1; i < argc; i++) {
++        char name[64];
++        const char *arg = argv[i], *equals = strchr(arg, '=');
++        size_t count = equals ? (size_t)(equals - arg) : strlen(arg);
++        if (count >= sizeof(name)) { fprintf(stderr, "Option name too long.\n"); exit(2); }
++        memcpy(name, arg, count); name[count] = 0;
++        const char *value = equals ? equals + 1 : NULL;
++        bool flag = true;
++        if (!strcmp(name, "--help") || !strcmp(name, "-h")) { usage(); exit(0); }
++        if (!strcmp(name, "--version")) { puts(FFRUNNER_BUILD " x86"); exit(0); }
++        if (!strcmp(name, "--borderless")) args.windowMode = BORDERLESS_FULLSCREEN;
++        else if (!strcmp(name, "--borderless-window")) args.windowMode = BORDERLESS_WINDOW;
++        else if (!strcmp(name, "--windowed")) args.windowMode = WINDOWED;
++        else if (!strcmp(name, "--query-vram")) args.queryVram = true;
++        else if (!strcmp(name, "--verbose") || !strcmp(name, "-v")) args.verboseLogging = true;
++        else if (!strcmp(name, "--force-opengl")) args.forceOpenGl = true;
++        else if (!strcmp(name, "--force-vulkan")) args.forceVulkan = true;
++        else if (!strcmp(name, "--loader-images")) args.useEndpointLoadingScreen = true;
++        else flag = false;
++        if (flag) {
++            if (value) { fprintf(stderr, "%s does not take a value.\n", name); exit(2); }
++            continue;
+         }
+-    } ARG_END;
+-
+-    if (args.mainPathOrAddress == NULL) {
+-        args.mainPathOrAddress = FALLBACK_SRC_URL;
+-    }
+-
+-    if (args.assetUrl == NULL) {
+-        args.assetUrl = FALLBACK_ASSET_URL;
+-    }
+-
+-    if (args.serverAddress == NULL) {
+-        args.serverAddress = FALLBACK_SERVER_ADDRESS;
+-    }
+-
+-    if (args.logPath == NULL) {
+-        args.logPath = LOG_FILE_PATH;
+-    }
+-
+-    if (args.windowWidth == 0) {
+-        args.windowWidth = DEFAULT_WIDTH;
+-    }
+-
+-    if (args.windowHeight == 0) {
+-        args.windowHeight = DEFAULT_HEIGHT;
+-    }
+-
+-    if (args.windowName == NULL) {
+-        args.windowName = DEFAULT_WINDOW_NAME;
++        if (!value) {
++            if (++i >= argc || argv[i][0] == '-') { fprintf(stderr, "Missing value for %s.\n", name); exit(2); }
++            value = argv[i];
++        }
++        if (!strcmp(name, "--main") || !strcmp(name, "-m")) args.mainPathOrAddress = (char*)value;
++        else if (!strcmp(name, "--address") || !strcmp(name, "-a")) args.serverAddress = (char*)value;
++        else if (!strcmp(name, "--asseturl")) args.assetUrl = (char*)value;
++        else if (!strcmp(name, "--endpoint") || !strcmp(name, "-e")) args.endpointHost = (char*)value;
++        else if (!strcmp(name, "--username") || !strcmp(name, "-u")) args.tegId = (char*)value;
++        else if (!strcmp(name, "--token") || !strcmp(name, "-t")) args.authId = (char*)value;
++        else if (!strcmp(name, "--log") || !strcmp(name, "-l")) args.logPath = (char*)value;
++        else if (!strcmp(name, "--name") || !strcmp(name, "-n")) args.windowName = (char*)value;
++        else if (!strcmp(name, "--icon") || !strcmp(name, "-i")) args.windowIcon = (char*)value;
++        else if (!strcmp(name, "--width")) args.windowWidth = parse_number(value, 320, 16384, name);
++        else if (!strcmp(name, "--height")) args.windowHeight = parse_number(value, 200, 16384, name);
++        else if (!strcmp(name, "--vram-mb")) args.vramMb = parse_number(value, 128, 2048, name);
++        else { fprintf(stderr, "Unknown option: %s. Use --help.\n", name); exit(2); }
++    }
++    if (args.forceOpenGl && args.forceVulkan) { fprintf(stderr, "Choose only one renderer override.\n"); exit(2); }
++    if (!args.mainPathOrAddress) args.mainPathOrAddress = FALLBACK_SRC_URL;
++    if (!args.assetUrl) args.assetUrl = FALLBACK_ASSET_URL;
++    if (!args.serverAddress) args.serverAddress = FALLBACK_SERVER_ADDRESS;
++    if (!args.logPath) args.logPath = LOG_FILE_PATH;
++    if (!args.windowWidth) args.windowWidth = DEFAULT_WIDTH;
++    if (!args.windowHeight) args.windowHeight = DEFAULT_HEIGHT;
++    if (!args.windowName) args.windowName = DEFAULT_WINDOW_NAME;
++    if (args.useEndpointLoadingScreen && !args.endpointHost) {
++        fprintf(stderr, "--loader-images requires --endpoint.\n"); exit(2);
+     }
+ }
+ 
+@@ -564,23 +577,21 @@
+ }
+ 
+ void
+-enable_dpi_awareness() {
+-    HMODULE shcore = LoadLibraryA("shcore.dll");
++enable_dpi_awareness(void)
++{
++    bool configured = false;
++    HMODULE shcore = LoadLibraryW(L"shcore.dll");
+     if (shcore) {
+-        SetProcessDpiAwarenessFunc setDpiAwareness =
++        SetProcessDpiAwarenessFunc setAwareness =
+             (SetProcessDpiAwarenessFunc)GetProcAddress(shcore, "SetProcessDpiAwareness");
+-        if (setDpiAwareness) {
+-            if (setDpiAwareness(PROCESS_PER_MONITOR_DPI_AWARE) == S_OK) {
+-                logmsg("Set DPI awareness to PROCESS_PER_MONITOR_DPI_AWARE\n");
+-            } else {
+-                logmsg("Failed to set DPI awareness: %d\n", GetLastError());
+-            }
++        if (setAwareness) {
++            HRESULT status = setAwareness(PROCESS_PER_MONITOR_DPI_AWARE);
++            configured = SUCCEEDED(status) || status == E_ACCESSDENIED;
+         }
+         FreeLibrary(shcore);
+-    } else {
+-        // Fallback for older systems
+-        SetProcessDPIAware();
+-    }
++    }
++    if (!configured) configured = SetProcessDPIAware() != FALSE;
++    logmsg("DPI awareness: %s\n", configured ? "enabled/already configured" : "runtime default");
+ }
+ 
+ HANDLE
+@@ -709,13 +720,13 @@
+     wchar_t cwd[MAX_PATH];
+     NPError ret;
+     HMODULE loader;
+-    RECT winRect;
+     char iconFile[MAX_PATH];
+ 
+     setup_console();
+     parse_args(argc, argv);
+     print_args();
+     init_logging(args.logPath, args.verboseLogging);
++    logmsg("FFRunner " FFRUNNER_BUILD " - x86 host for 32-bit Unity; ARM runtimes require x86/WoW64 support.\n");
+ 
+     enable_dpi_awareness();
+ 
+@@ -785,15 +796,19 @@
+     }
+ 
+     prepare_window(args.windowWidth, args.windowHeight, iconToUse);
+-    assert(hwnd);
+-
++    if (!hwnd) return 1;
+     dbglogmsg("> NP_GetEntryPoints\n");
+     ret = NP_GetEntryPoints(&pluginFuncs);
+     dbglogmsg("  returned %d\n", ret);
++    if (ret != NPERR_NO_ERROR || !pluginFuncs.newp || !pluginFuncs.setwindow || !pluginFuncs.destroy || !pluginFuncs.getvalue) {
++        logmsg("Invalid Unity entry points: %d\n", ret); return 1;
++    }
+ 
+     dbglogmsg("> NP_Initialize\n");
+     ret = NP_Initialize(&netscapeFuncs);
+     dbglogmsg("  returned %d\n", ret);
++
++    if (ret != NPERR_NO_ERROR) { logmsg("Unity initialization failed: %d\n", ret); return 1; }
+ 
+     char width[16], height[16];
+     snprintf(width, sizeof(width), "%d", args.windowWidth);
+@@ -831,8 +846,15 @@
+     ret = pluginFuncs.newp("application/vnd.ffuwp", &npp, 1, ARRLEN(argn), argn, argp, savedPtr);
+     dbglogmsg("  returned %d\n", ret);
+ 
+-    ShowWindow(hwnd, SW_SHOWDEFAULT);
++    if (ret != NPERR_NO_ERROR) { logmsg("Unity instance failed: %d\n", ret); NP_Shutdown(); return 1; }
++
++    /* Match upstream: show the host after NPP_New, before NPP_SetWindow.
++     * Window callbacks stay guarded until NPWindow is initialized below. */
++    ShowWindow(hwnd, SW_SHOW);
+     UpdateWindow(hwnd);
++    if (SetForegroundWindow(hwnd)) SetFocus(hwnd);
++    logmsg("Before Unity window attachment: visible=%d foreground=%d\n",
++        IsWindowVisible(hwnd) != FALSE, GetForegroundWindow() == hwnd);
+ 
+     npWin = (NPWindow){
+         .window = hwnd,
+@@ -844,27 +866,18 @@
+         .type = NPWindowTypeWindow
+     };
+ 
+-    /* adjust plugin rect to the real inner size of the window */
+-    if (GetClientRect(hwnd, &winRect)) {
+-        npWin.x = winRect.left;
+-        npWin.y = winRect.top;
+-        npWin.clipRect.top = 0;
+-        npWin.clipRect.left = 0;
+-        npWin.clipRect.right = winRect.right;
+-        npWin.clipRect.bottom = winRect.bottom;
+-        npWin.width = winRect.right - winRect.left;
+-        npWin.height = winRect.bottom - winRect.top;
+-    }
+-
+-    dbglogmsg("> NPP_SetWindowProc\n");
+-    ret = pluginFuncs.setwindow(&npp, &npWin);
+-    dbglogmsg("  returned %d\n", ret);
++    /* Initial plugin attachment happens only after NPP_New and NPWindow setup. */
++    pluginWindowReady = true;
++    update_plugin_window(false);
+ 
+ 
+     dbglogmsg("> NPP_GetValueProc\n");
+     ret = pluginFuncs.getvalue(&npp, NPPVpluginScriptableNPObject, &scriptableObject);
+     dbglogmsg("  returned %d and NPObject %p\n", ret, scriptableObject);
+-    assert(scriptableObject->_class);
++    if (ret != NPERR_NO_ERROR || !scriptableObject || !scriptableObject->_class) {
++        logmsg("Unity script object unavailable: %d\n", ret);
++        detach_plugin_window(); pluginFuncs.destroy(&npp, &savedPtr); NP_Shutdown(); return 1;
++    }
+ 
+     dbglogmsg("> scriptableObject.hasMethod style\n");
+     ret = scriptableObject->_class->hasMethod(scriptableObject, getNPIdentifier("style"));
+@@ -872,10 +885,12 @@
+ 
+     message_loop();
+ 
++    detach_plugin_window();
+     dbglogmsg("> NPP_DestroyProc\n");
+     ret = pluginFuncs.destroy(&npp, &savedPtr);
+     dbglogmsg("  returned %d\n", ret);
+ 
++    NP_Shutdown();
+     return 0;
+ }
+ 
+--- original/graphics.c
++++ custom/graphics.c
+@@ -1,113 +1,169 @@
+ #include "ffrunner.h"
+ 
+ HWND hwnd;
++bool pluginWindowReady;
++static bool settingPluginWindow, pluginWindowAttached;
++
++void
++update_plugin_window(bool minimized)
++{
++    RECT client;
++    /* CreateWindow/ShowWindow can send synchronous messages before NPP_New. */
++    if (!pluginWindowReady || settingPluginWindow || !pluginFuncs.setwindow || !npWin.window)
++        return;
++    if (!GetClientRect(hwnd, &client))
++        return;
++    /* Ignore transient zero-sized surfaces; retain the last valid dimensions
++     * when minimized. Never resize the engine to a zero-sized render target. */
++    uint32_t width = minimized ? npWin.width : (uint32_t)(client.right - client.left);
++    uint32_t height = minimized ? npWin.height : (uint32_t)(client.bottom - client.top);
++    if (!width || !height || width > 65535 || height > 65535) return;
++    uint16_t right = minimized ? 0 : (uint16_t)width;
++    uint16_t bottom = minimized ? 0 : (uint16_t)height;
++    if (pluginWindowAttached && npWin.width == width && npWin.height == height
++            && npWin.clipRect.right == right && npWin.clipRect.bottom == bottom)
++        return;
++    npWin.x = npWin.y = 0;
++    npWin.width = width;
++    npWin.height = height;
++    npWin.clipRect.top = npWin.clipRect.left = 0;
++    npWin.clipRect.right = right;
++    npWin.clipRect.bottom = bottom;
++    settingPluginWindow = true;
++    NPError status = pluginFuncs.setwindow(&npp, &npWin);
++    settingPluginWindow = false;
++    pluginWindowAttached = pluginWindowReady && status == NPERR_NO_ERROR;
++    if (status != NPERR_NO_ERROR) logmsg("Unity window attachment failed: %d\n", status);
++}
++
++void
++detach_plugin_window(void)
++{
++    if (!pluginWindowReady) return;
++    /* Clear first: the callback can synchronously dispatch window messages. */
++    pluginWindowReady = false;
++    pluginWindowAttached = false;
++    if (pluginFuncs.setwindow) pluginFuncs.setwindow(&npp, NULL);
++}
++
++static bool
++window_geometry(HWND window, uint32_t width, uint32_t height, DWORD style, RECT *rect)
++{
++    MONITORINFO monitor = {0};
++    monitor.cbSize = sizeof(monitor);
++    HMONITOR display = MonitorFromWindow(window, MONITOR_DEFAULTTOPRIMARY);
++    if (!GetMonitorInfoW(display, &monitor)) return false;
++    if (args.windowMode == BORDERLESS_FULLSCREEN) {
++        *rect = monitor.rcMonitor;
++        return true;
++    }
++    *rect = (RECT){0, 0, (LONG)width, (LONG)height};
++    if (!AdjustWindowRectEx(rect, style, FALSE, 0)) return false;
++    LONG outerWidth = rect->right - rect->left;
++    LONG outerHeight = rect->bottom - rect->top;
++    /* Signed arithmetic avoids wraparound when the requested size is larger. */
++    rect->left = monitor.rcWork.left +
++        ((monitor.rcWork.right - monitor.rcWork.left) - outerWidth) / 2;
++    rect->top = monitor.rcWork.top +
++        ((monitor.rcWork.bottom - monitor.rcWork.top) - outerHeight) / 2;
++    rect->right = rect->left + outerWidth;
++    rect->bottom = rect->top + outerHeight;
++    return true;
++}
+ 
+ LRESULT CALLBACK
+-window_proc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam)
+-{
+-    RECT windowRect;
+-    UINT windowState;
++window_proc(HWND window, UINT uMsg, WPARAM wParam, LPARAM lParam)
++{
+     PAINTSTRUCT ps;
+-    HDC hdc;
+-    Request *req;
+-
++    RECT target;
+     switch (uMsg) {
+     case WM_CLOSE:
++        detach_plugin_window();
++        DestroyWindow(window);
++        return 0;
+     case WM_DESTROY:
+-        pluginFuncs.setwindow(&npp, NULL);
++        detach_plugin_window();
+         PostQuitMessage(0);
+         return 0;
+     case WM_PAINT:
+-        hdc = BeginPaint(hwnd, &ps);
+-
+-        /* All painting occurs here, between BeginPaint and EndPaint. */
+-
+-        FillRect(hdc, &ps.rcPaint, (HBRUSH) (COLOR_WINDOW+1));
+-
+-        EndPaint(hwnd, &ps);
+-        return 0;
+-    case WM_MOVE:
+-        if (GetClientRect(hwnd, &windowRect)) {
+-            npWin.x = windowRect.left;
+-            npWin.y = windowRect.top;
+-        }
+-
+-        pluginFuncs.setwindow(&npp, &npWin);
+-        /* Let DefWindowProc handle the rest. */
++        BeginPaint(window, &ps);
++        FillRect(ps.hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
++        EndPaint(window, &ps);
++        return 0;
++    case WM_SIZE:
++        /* Queue the update: do not reenter Unity from synchronous Win32
++         * messages dispatched by Unity's own graphics/window initialization. */
++        if (pluginWindowReady) PostMessageW(window, WM_APP + 1, 0, 0);
+         break;
+-    case WM_SIZE:
+-        windowState = wParam;
+-
+-        npWin.clipRect.top = 0;
+-        npWin.clipRect.left = 0;
+-
+-        if (windowState == SIZE_MINIMIZED) {
+-            npWin.clipRect.right = 0;
+-            npWin.clipRect.bottom = 0;
+-        } else {
+-            if (GetClientRect(hwnd, &windowRect)) {
+-                npWin.width = windowRect.right - windowRect.left;
+-                npWin.height = windowRect.bottom - windowRect.top;
+-                npWin.clipRect.right = npWin.width;
+-                npWin.clipRect.bottom = npWin.height;
+-            }
+-        }
+-
+-        pluginFuncs.setwindow(&npp, &npWin);
+-        /* Let DefWindowProc handle the rest. */
+-        break;
+-    }
+-
+-    if (uMsg == ioMsg) {
+-        req = (Request*)lParam;
++    case WM_APP + 1:
++        update_plugin_window(IsIconic(window) != FALSE);
++        return 0;
++    case WM_DPICHANGED:
++    case WM_DISPLAYCHANGE:
++        if (window_geometry(window, args.windowWidth, args.windowHeight,
++                            (DWORD)GetWindowLongW(window, GWL_STYLE), &target)) {
++            SetWindowPos(window, NULL, target.left, target.top,
++                target.right - target.left, target.bottom - target.top,
++                SWP_NOZORDER | SWP_NOACTIVATE);
++        }
++        return 0;
++    }
++    if (ioMsg && uMsg == ioMsg) {
++        Request *req = (Request*)lParam;
+         handle_io_progress(req);
+         SetEvent(req->readyEvent);
+         return 0;
+     }
+-
+-    return DefWindowProcW(hwnd, uMsg, wParam, lParam);
++    return DefWindowProcW(window, uMsg, wParam, lParam);
+ }
+ 
+ void
+ prepare_window(uint32_t width, uint32_t height, const char *iconFile)
+ {
+     WNDCLASSW wc = {0};
+-    HICON hIcon = NULL;
+-    int x, y;
+-    wchar_t *windowName;
+-    size_t windowNameLen;
+-
+-    wc.lpfnWndProc   = window_proc;
+-    wc.hInstance     = GetModuleHandleW(NULL);
++    RECT bounds;
++    HICON icon = NULL;
++    DWORD style = (args.windowMode == WINDOWED ? WS_OVERLAPPEDWINDOW : WS_POPUP)
++        | WS_CLIPCHILDREN | WS_CLIPSIBLINGS;
++    wc.lpfnWndProc = window_proc;
++    wc.hInstance = GetModuleHandleW(NULL);
+     wc.lpszClassName = CLASS_NAME;
+-    wc.style         = CS_DBLCLKS;
+-
++    wc.style = CS_DBLCLKS;
++    wc.hCursor = LoadCursorW(NULL, MAKEINTRESOURCEW(32512));
+     if (iconFile) {
+-        hIcon = (HICON)LoadImageA(NULL, iconFile, IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
+-        if (!hIcon) {
+-            logmsg("Failed to load icon from %s: %d\n", iconFile, GetLastError());
+-        } else {
+-            DeleteFileA(iconFile);
+-        }
+-    }
+-
+-    if (!hIcon) {
+-        hIcon = LoadIconW(wc.hInstance, MAKEINTRESOURCEW(0));
+-    }
+-
+-    wc.hIcon = hIcon;
+-
+-    RegisterClassW(&wc);
+-
+-    x = (GetSystemMetrics(SM_CXSCREEN) - width) / 2;
+-    y = (GetSystemMetrics(SM_CYSCREEN) - height) / 2;
+-
+-    windowNameLen = strlen(args.windowName) + 1;
+-    windowName = (wchar_t*)malloc(sizeof(wchar_t) * windowNameLen);
+-    mbstowcs(windowName, args.windowName, windowNameLen);
+-
+-    hwnd = CreateWindowExW(0, CLASS_NAME, windowName, WS_OVERLAPPEDWINDOW, x, y, width, height, 0, 0, GetModuleHandleW(NULL), 0);
+-    free(windowName);
++        icon = (HICON)LoadImageA(NULL, iconFile, IMAGE_ICON, 0, 0,
++                               LR_LOADFROMFILE | LR_DEFAULTSIZE);
++        if (icon) DeleteFileA(iconFile);
++    }
++    wc.hIcon = icon ? icon : LoadIconW(wc.hInstance, MAKEINTRESOURCEW(0));
++    if (!RegisterClassW(&wc) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) {
++        logmsg("RegisterClass failed: %lu\n", GetLastError());
++        return;
++    }
++    if (!window_geometry(NULL, width, height, style, &bounds)) {
++        logmsg("Cannot read desktop geometry: %lu\n", GetLastError());
++        return;
++    }
++    int count = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, args.windowName, -1, NULL, 0);
++    UINT codepage = CP_UTF8;
++    if (!count) { codepage = CP_ACP; count = MultiByteToWideChar(codepage, 0, args.windowName, -1, NULL, 0); }
++    if (!count) return;
++    wchar_t *title = calloc((size_t)count, sizeof(wchar_t));
++    if (!title) return;
++    MultiByteToWideChar(codepage, 0, args.windowName, -1, title, count);
++    hwnd = CreateWindowExW(0, CLASS_NAME, title, style, bounds.left, bounds.top,
++        bounds.right - bounds.left, bounds.bottom - bounds.top, NULL, NULL, wc.hInstance, NULL);
++    free(title);
++    if (!hwnd) { logmsg("CreateWindow failed: %lu\n", GetLastError()); return; }
++    RECT client;
++    if (GetClientRect(hwnd, &client)) {
++        args.windowWidth = client.right - client.left;
++        args.windowHeight = client.bottom - client.top;
++    }
++    logmsg("Window mode: %s; client size: %u x %u\n",
++        args.windowMode == WINDOWED ? "windowed" :
++        args.windowMode == BORDERLESS_WINDOW ? "borderless window" : "borderless fullscreen",
++        args.windowWidth, args.windowHeight);
+ }
+ 
+ void
+@@ -165,13 +221,15 @@
+ 
+ static
+ bool
+-get_vram_from_dxgi(size_t* vramBytes)
++get_vram_from_dxgi(HMODULE dxgi, uint64_t* vramBytes)
+ {
+ 	*vramBytes = 0;
+     HMONITOR monitor = get_primary_monitor();
+ 
+     IDXGIFactory* factory = NULL;
+-    CreateDXGIFactory(&IID_IDXGIFactory, (void**)&factory);
++    typedef HRESULT (WINAPI *CreateFactory)(REFIID, void**);
++    CreateFactory createFactory = (CreateFactory)GetProcAddress(dxgi, "CreateDXGIFactory");
++    if (!createFactory || FAILED(createFactory(&IID_IDXGIFactory, (void**)&factory))) return false;
+     if (factory == NULL) {
+         return false;
+     }
+@@ -206,7 +264,7 @@
+         HRESULT hr = adapter->lpVtbl->GetDesc(adapter, &adapterDesc);
+         adapter->lpVtbl->Release(adapter);
+         if (SUCCEEDED(hr)) {
+-            *vramBytes = adapterDesc.DedicatedVideoMemory + adapterDesc.SharedSystemMemory;
++            *vramBytes = (uint64_t)adapterDesc.DedicatedVideoMemory + (uint64_t)adapterDesc.SharedSystemMemory;
+             factory->lpVtbl->Release(factory);
+             return true;
+         }
+@@ -219,16 +277,26 @@
+ void
+ apply_vram_fix()
+ {
+-    size_t vramBytes;
+-    if (!get_vram_from_dxgi(&vramBytes)) {
+-        logmsg("Failed to get VRAM size from DXGI; game will try to query it\n");
+-        return;
+-    }
+-
+-    size_t vramMegabytes = vramBytes >> 20;
+-    logmsg("VRAM size: %zu bytes (%zu MB)\n", vramBytes, vramMegabytes);
+-    char vramMbStr[32];
+-    snprintf(vramMbStr, sizeof(vramMbStr), "%zu", vramMegabytes);
+-    logmsg("setenv(\"UNITY_FF_VRAM_MB\", \"%s\")\n", vramMbStr);
+-    SetEnvironmentVariableA("UNITY_FF_VRAM_MB", vramMbStr);
+-}
++    char existing[32], value[32];
++    DWORD size = GetEnvironmentVariableA("UNITY_FF_VRAM_MB", existing, sizeof(existing));
++    if (!args.vramMb && size) {
++        logmsg("Preserving UNITY_FF_VRAM_MB from the container.\n");
++        return;
++    }
++    uint64_t megabytes = args.vramMb ? args.vramMb : 512;
++    if (!args.vramMb && args.queryVram) {
++        HMODULE dxgi = LoadLibraryW(L"dxgi.dll");
++        uint64_t bytes;
++        if (dxgi && get_vram_from_dxgi(dxgi, &bytes) && bytes)
++            megabytes = bytes >> 20;
++        else logmsg("DXGI memory query unavailable; using 512 MB.\n");
++        if (dxgi) FreeLibrary(dxgi);
++        if (megabytes < 128) megabytes = 128;
++        if (megabytes > 2048) megabytes = 2048;
++    }
++    /* This is a Unity allocation hint, not a physical GPU-memory reservation. */
++    snprintf(value, sizeof(value), "%u", (unsigned)megabytes);
++    SetEnvironmentVariableA("UNITY_FF_VRAM_MB", value);
++    logmsg("Unity VRAM hint: %s MB (%s).\n", value,
++        args.queryVram ? "requested query" : "DXGI startup probe skipped");
++}
+--- original/ffrunner.h
++++ custom/ffrunner.h
+@@ -11,6 +11,14 @@
+ #include <wininet.h>
+ #include <shellscalingapi.h>
+ #include <dxgi.h>
++
++/* The shipped Unity Web Player/Mono DLLs use the 32-bit NPAPI ABI. */
++#if defined(_WIN64)
++#error FFRunner requires an x86 build for the supplied 32-bit Unity Web Player
++#endif
++
++#define FFRUNNER_BUILD "1.1.1-wine-windowfix"
++enum WindowMode { WINDOWED, BORDERLESS_WINDOW, BORDERLESS_FULLSCREEN };
+ 
+ #include "npapi/npapi.h"
+ #include "npapi/npfunctions.h"
+@@ -110,6 +118,9 @@
+     bool verboseLogging;
+     bool forceVulkan;
+     bool forceOpenGl;
++    enum WindowMode windowMode;
++    bool queryVram;
++    uint32_t vramMb;
+ };
+ 
+ extern Arguments args;
+@@ -119,6 +130,7 @@
+ extern NPWindow npWin;
+ 
+ extern HWND hwnd;
++extern bool pluginWindowReady;
+ 
+ extern PTP_POOL threadpool;
+ extern UINT ioMsg;
+@@ -132,6 +144,8 @@
+ void init_network(char *mainSrcUrl);
+ 
+ void prepare_window(uint32_t width, uint32_t height, const char *iconFile);
++void update_plugin_window(bool minimized);
++void detach_plugin_window(void);
+ void show_error_dialog(char *msg);
+ void open_link(char *url);
+ void message_loop(void);
+--- original/requests.c
++++ custom/requests.c
+@@ -581,8 +581,18 @@
+             req->writePtr = req->writeSize;
+         } else {
+             /* main thread has to pipe progress to the plugin */
+-            PostMessageW(hwnd, ioMsg, (WPARAM)NULL, (LPARAM)req);
++            uint32_t previousWritten = req->bytesWritten;
++            if (!PostMessageW(hwnd, ioMsg, (WPARAM)NULL, (LPARAM)req)) {
++                logmsg("Cannot dispatch Unity stream progress: %lu\n", GetLastError());
++                cancel_request(req);
++                break;
++            }
+             WaitForSingleObject(req->readyEvent, INFINITE);
++            /* Unity can return WriteReady=0 while compiling/loading. Avoid a
++             * tight worker/UI message loop on CPU translation runtimes. */
++            if (!req->done && !req->failed && req->bytesWritten == previousWritten
++                    && req->writePtr < req->writeSize)
++                Sleep(2);
+         }
+ 
+         if (req->done || req->failed) {
+--- original/logging.c
++++ custom/logging.c
+@@ -39,6 +39,8 @@
+     va_start(args, fmt);
+     len = vsnprintf(buf, ARRLEN(buf), fmt, args);
+     va_end(args);
++    if (len < 0) return;
++    if ((size_t)len >= sizeof(buf)) len = sizeof(buf) - 1;
+ 
+     EnterCriticalSection(&cs);
+     if (logFile != INVALID_HANDLE_VALUE) {
+@@ -63,6 +65,8 @@
+     va_start(args, fmt);
+     len = vsnprintf(buf, ARRLEN(buf), fmt, args);
+     va_end(args);
++    if (len < 0) return;
++    if ((size_t)len >= sizeof(buf)) len = sizeof(buf) - 1;
+ 
+     EnterCriticalSection(&cs);
+     if (logFile != INVALID_HANDLE_VALUE) {
+--- original/Makefile
++++ custom/Makefile
+@@ -1,5 +1,8 @@
+ CC=i686-w64-mingw32-gcc
+ WINDRES=i686-w64-mingw32-windres
++CFLAGS ?= -std=c99 -O2 -g -march=i686 -mtune=generic -fno-strict-aliasing -fno-tree-vectorize -Wall
++LDFLAGS ?= -mwindows -static-libgcc -Wl,--large-address-aware,--dynamicbase,--nxcompat
++LDLIBS = -lwindowscodecs -lwininet -ldxguid -lgdi32
+ 
+ SRC=\
+ 	ffrunner.c\
+@@ -20,7 +23,7 @@
+ 	$(WINDRES) ffrunner.rc -O coff -o ffrunner.res
+ 
+ ffrunner.exe: ffrunner.res $(SRC) $(HDR)
+-	$(CC) -std=c99 -pedantic -mwindows -Wl,--large-address-aware -O0 -g $(SRC) -o ffrunner.exe ffrunner.res -lwindowscodecs -lwininet -ldxgi
++	$(CC) $(CFLAGS) $(SRC) -o ffrunner.exe ffrunner.res $(LDFLAGS) $(LDLIBS)
+ 
+ gdbs:
+ 	wine /usr/share/win32/gdbserver.exe localhost:10000 ffrunner.exe
+--- original/CMakeLists.txt
++++ custom/CMakeLists.txt
+@@ -1,14 +1,19 @@
+-cmake_minimum_required(VERSION 3.5.0)
++cmake_minimum_required(VERSION 3.13)
+ project(ffrunner VERSION 0.1.0 LANGUAGES C)
++
++if (NOT CMAKE_SIZEOF_VOID_P EQUAL 4)
++    message(FATAL_ERROR "Use an x86 toolchain: the supplied Unity Web Player DLLs are 32-bit.")
++endif()
+ 
+ add_executable(ffrunner ffrunner.c graphics.c requests.c logging.c ffrunner.rc)
+ 
+ if (MSVC)
+-    set_target_properties(ffrunner PROPERTIES LINK_FLAGS "/LARGEADDRESSAWARE")
+-    set_target_properties(ffrunner PROPERTIES LINK_FLAGS "/SUBSYSTEM:WINDOWS")
++    target_link_options(ffrunner PRIVATE /LARGEADDRESSAWARE /SUBSYSTEM:WINDOWS)
++else()
++    target_compile_options(ffrunner PRIVATE -O2 -fno-strict-aliasing -fno-tree-vectorize)
++    target_link_options(ffrunner PRIVATE -mwindows -static-libgcc -Wl,--large-address-aware,--dynamicbase,--nxcompat)
+ endif()
+ 
+ set_target_properties(ffrunner PROPERTIES C_STANDARD 99)
+ 
+-target_link_libraries(ffrunner windowscodecs wininet dxgi)
+-
++target_link_libraries(ffrunner windowscodecs wininet dxguid gdi32)
+--- original/ffrunner.rc
++++ custom/ffrunner.rc
+@@ -1,24 +1,24 @@
+ 0 ICON "fusionfall.ico"
+ 1 VERSIONINFO
+-FILEVERSION     1,0,0,0
+-PRODUCTVERSION  1,0,0,0
++FILEVERSION     1,1,1,0
++PRODUCTVERSION  1,1,1,0
+ BEGIN
+   BLOCK "StringFileInfo"
+   BEGIN
+     BLOCK "040904E4"
+     BEGIN
+       VALUE "CompanyName", "OpenFusion"
+-      VALUE "FileDescription", "FusionFall"
+-      VALUE "FileVersion", "1.0"
++      VALUE "FileDescription", "FusionFall - Wine borderless test build (x86)"
++      VALUE "FileVersion", "1.1.1-wine-windowfix"
+       VALUE "InternalName", "ffrunner"
+       VALUE "LegalCopyright", "(C) 2025 OpenFusion Contributors"
+-      VALUE "OriginalFilename", "ffrunner.exe"
++      VALUE "OriginalFilename", "ffrunner-android.exe"
+       VALUE "ProductName", "FusionFall"
+-      VALUE "ProductVersion", "1.0"
++      VALUE "ProductVersion", "1.1.1-wine-windowfix"
+     END
+   END
+   BLOCK "VarFileInfo"
+   BEGIN
+     VALUE "Translation", 0x409, 1252
+   END
+-END+END

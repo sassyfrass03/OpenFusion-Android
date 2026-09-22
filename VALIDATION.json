@@ -1,0 +1,27 @@
+{
+  "source": "0.4.11-test",
+  "version_code": 16,
+  "runner_source_build": "1.9.0-android-auth-kbm-toplevel2",
+  "apk_built": true,
+  "runner_built": true,
+  "checks_passed": [
+    "FFRunner 1.9.0 compiled as PE32 i386 and staged byte-for-byte into APK",
+    "FFRunner portable parser/window lifecycle: 18 argument cases",
+    "requested controller mapping retained; Start uses Enter/Return scan-code injection",
+    "controller keyboard/mouse focus gate accepts Unity fullscreen windows from the same process",
+    "recursive UnityIntermediate -> UnityWindow discovery and top-level promotion hooks compiled and statically regression-checked",
+    "previous forced browser NPP_SetWindow focus reattach removed",
+    "launcher DXVK config reduced to d3d9.enableDialogMode=True; DXVK_FORCE_WINDOWED=1 retained",
+    "APK signature verification: v2 and v3",
+    "APK signer certificate matches 0.4.10 test build",
+    "APK zipalign verification passed"
+  ],
+  "not_tested": [
+    "top-level UnityWindow browser renderer on target Ludashi/GameNative device",
+    "browser-mode frame pacing after UnityWindow promotion",
+    "browser -> full 1280x720 -> browser repeated display changes after UnityWindow promotion",
+    "Start/Pause Enter/Return scan-code behavior on target device"
+  ],
+  "apk_sha256": "e933727ce7f8489c8c04884f8a8a29f9474236746d01b65a7b420e36c014fb47",
+  "runner_sha256": "8078aa13dd4557ac78fbb28efe2d0041ec811f62377a84f5be79f1595a3363eb"
+}

@@ -1,0 +1,3 @@
+PASS: initial persistent identity; separate server profiles; capability enforced; busy port rejected
+PASS: same full game URL across process restart; capability enforced; busy port rejected
+PASS: native borderless/windowed launch, dimensions, quoting, and persistent launch script.
