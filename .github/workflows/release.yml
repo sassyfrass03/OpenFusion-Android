@@ -10,6 +10,10 @@ on:
 permissions:
   contents: write
 
+env:
+  ANDROID_HOME: /usr/local/lib/android/sdk
+  ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
+
 jobs:
   build:
     name: Build APK
@@ -17,26 +21,43 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Set up Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install Android SDK packages
         shell: bash
         run: |
-          yes | sdkmanager --licenses >/dev/null || true
+          SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
 
-          sdkmanager \
+          if [ ! -x "$SDKMANAGER" ]; then
+            echo "::error::sdkmanager was not found at $SDKMANAGER"
+            exit 1
+          fi
+
+          yes | "$SDKMANAGER" --licenses >/dev/null || true
+
+          "$SDKMANAGER" \
             "platform-tools" \
             "platforms;android-35" \
             "build-tools;35.0.1"
+
+          echo "$ANDROID_SDK_ROOT/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_SDK_ROOT/build-tools/35.0.1" >> "$GITHUB_PATH"
+
+      - name: Verify Android SDK
+        shell: bash
+        run: |
+          test -f "$ANDROID_SDK_ROOT/platforms/android-35/android.jar"
+          test -x "$ANDROID_SDK_ROOT/build-tools/35.0.1/aapt2"
+          test -x "$ANDROID_SDK_ROOT/build-tools/35.0.1/apksigner"
+          test -x "$ANDROID_SDK_ROOT/build-tools/35.0.1/zipalign"
+
+          echo "Android SDK is ready."
 
       - name: Restore release signing key
         shell: bash
@@ -51,6 +72,13 @@ jobs:
           printf '%s' "$KEYSTORE_B64" \
             | base64 --decode \
             > "$RUNNER_TEMP/openfusion-release.jks"
+
+          keytool -list \
+            -keystore "$RUNNER_TEMP/openfusion-release.jks" \
+            -storepass android \
+            -alias androiddebugkey >/dev/null
+
+          echo "Release signing key restored."
 
       - name: Read launcher version
         shell: bash
@@ -76,6 +104,8 @@ jobs:
           echo "VERSION_NAME=$VERSION_NAME" >> "$GITHUB_ENV"
           echo "APK_PATH=build/OpenFusion-Android-$VERSION_NAME.apk" >> "$GITHUB_ENV"
 
+          echo "Building OpenFusion Android $VERSION_NAME"
+
       - name: Build signed APK
         shell: bash
         run: |
@@ -84,6 +114,21 @@ jobs:
             --build-tools "$ANDROID_SDK_ROOT/build-tools/35.0.1" \
             --keystore "$RUNNER_TEMP/openfusion-release.jks" \
             --output "$APK_PATH"
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/35.0.1/apksigner" \
+            verify \
+            --verbose \
+            --print-certs \
+            "$APK_PATH"
+
+          "$ANDROID_SDK_ROOT/build-tools/35.0.1/zipalign" \
+            -c \
+            -v \
+            4 \
+            "$APK_PATH"
 
       - name: Generate checksums
         shell: bash
@@ -96,7 +141,7 @@ jobs:
           echo
           cat build/SHA256SUMS.txt
 
-      - name: Upload Actions artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: OpenFusion-Android-${{ env.VERSION_NAME }}
