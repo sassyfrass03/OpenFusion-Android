@@ -8,6 +8,8 @@ The desktop OpenFusion launcher is built around a Windows/WebView2 workflow that
 > **Current build:** `0.4.11-stable-runtime-detection`  
 > **Minimum Android version:** Android 8.0 / API 26
 
+## Discord for debugging and development
+https://discord.gg/bHQAd6KACr
 ## What it does
 
 - Provides a native Android setup and sign-in flow for OpenFusion servers.
